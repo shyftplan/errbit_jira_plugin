@@ -53,8 +53,6 @@ module ErrbitJiraPlugin
         )
       ))
     end
-
-    (File.read(File.join(ErrbitJiraPlugin.root, 'vendor/assets/images', 'jira_issues_body.txt.erb' )))
     
     def self.icons
       @icons ||= {
