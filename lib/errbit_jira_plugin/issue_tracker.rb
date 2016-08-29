@@ -1,4 +1,4 @@
-require 'jira'
+require 'jira-ruby'
 
 module ErrbitJiraPlugin
   class IssueTracker < ErrbitPlugin::IssueTracker
@@ -6,33 +6,33 @@ module ErrbitJiraPlugin
 
     NOTE = 'Please configure Jira by entering the information below.'
 
-    FIELDS = [
-        [:base_url, {
-            :label => 'Jira URL without trailing slash',
-            :placeholder => 'https://jira.example.org'
-        }],
-        [:context_path, {
-            :optional => true,
-            :label => 'Context Path (Just "/" if empty otherwise with leading slash)',
-            :placeholder => "/jira"
-        }],
-        [:username, {
-            :label => 'Username',
-            :placeholder => 'johndoe'
-        }],
-        [:password, {
-            :label => 'Password',
-            :placeholder => 'p@assW0rd'
-        }],
-        [:project_id, {
-            :label => 'Project Key',
-            :placeholder => 'The project Key where the issue will be created'
-        }],
-        [:issue_priority, {
-            :label => 'Priority',
-            :placeholder => 'Normal'
-        }]
-    ]
+    FIELDS = {
+      :base_url => {
+          :label => 'Jira URL without trailing slash',
+          :placeholder => 'https://jira.example.org'
+      },
+      :context_path => {
+          :optional => true,
+          :label => 'Context Path (Just "/" if empty otherwise with leading slash)',
+          :placeholder => "/jira"
+      },
+      :username => {
+          :label => 'Username',
+          :placeholder => 'johndoe'
+      },
+      :password => {
+          :label => 'Password',
+          :placeholder => 'p@assW0rd'
+      },
+      :project_id => {
+          :label => 'Project Key',
+          :placeholder => 'The project Key where the issue will be created'
+      },
+      :issue_priority => {
+          :label => 'Priority',
+          :placeholder => 'Normal'
+      }
+    }
 
     def self.label
       LABEL
@@ -46,6 +46,20 @@ module ErrbitJiraPlugin
       FIELDS
     end
 
+    def self.icons
+      @icons ||= {
+        create: [
+          'image/png', ErrbitJiraPlugin.read_static_file('jira_create.png')
+        ],
+        goto: [
+          'image/png', ErrbitJiraPlugin.read_static_file('jira_goto.png'),
+        ],
+        inactive: [
+          'image/png', ErrbitJiraPlugin.read_static_file('jira_inactive.png'),
+        ]
+      }
+    end
+
     def self.body_template
       @body_template ||= ERB.new(File.read(
         File.join(
@@ -53,7 +67,7 @@ module ErrbitJiraPlugin
         )
       ))
     end
-    
+
     def self.icons
       @icons ||= {
         create: [
@@ -74,7 +88,7 @@ module ErrbitJiraPlugin
 
     def errors
       errors = []
-      if self.class.fields.detect {|f| params[f[0]].blank? && !f[1][:optional]}
+      if self.class.fields.detect {|f| options[f[0]].blank? }
         errors << [:base, 'You must specify all non optional values!']
       end
       errors
@@ -88,46 +102,61 @@ module ErrbitJiraPlugin
       false
     end
 
-    def client
-      options = {
+    def jira_options
+      {
         :username => params['username'],
         :password => params['password'],
         :site => params['base_url'],
         :auth_type => :basic,
-        :context_path => (params['context_path'] == '/') ? params['context_path'] = '' : params['context_path']
+        :context_path => context_path
       }
-      JIRA::Client.new(options)
     end
 
-    def create_issue(problem, reported_by = nil)
+    def create_issue(title, body, user: {})
       begin
-        issue_title =  "[#{ problem.environment }][#{ problem.where }] #{problem.message.to_s.truncate(100)}".delete!("\n")
-        issue_description = self.class.body_template.result(binding).unpack('C*').pack('U*')
-        issue = {"fields"=>{"summary"=>issue_title, "description"=>issue_description,"project"=>{"key"=>params['project_id']},"issuetype"=>{"id"=>"3"},"priority"=>{"name"=>params['issue_priority']}}}
+        client = JIRA::Client.new(jira_options)
+        project = client.Project.find(params['project_id'])
 
-        issue_build = client.Issue.build
-        issue_build.save(issue)
+        issue_fields =  {
+                          "fields" => {
+                            "summary" => title,
+                            "description" => body,
+                            "project"=> {"id"=> project.id},
+                            "issuetype"=>{"id"=>"3"},
+                            "priority"=>{"name"=>params['issue_priority']}
+                          }
+                        }
 
-        problem.update_attributes(
-          :issue_link => jira_url(issue_build.key),
-          :issue_type => params['issue_type']
-        )
+        jira_issue = client.Issue.build
 
+        jira_issue.save(issue_fields)
+
+        jira_url(params['project_id'])
       rescue JIRA::HTTPError
         raise ErrbitJiraPlugin::IssueError, "Could not create an issue with Jira.  Please check your credentials."
       end
     end
 
     def jira_url(project_id)
-      "#{params['base_url']}#{ctx_path}browse/#{project_id}"
-    end
-
-    def ctx_path
-      (params['context_path'] == '') ? '/' : params['context_path']
+      "#{params['base_url']}#{params['context_path']}browse/#{project_id}"
     end
 
     def url
       params['base_url']
+    end
+
+    private
+
+    def context_path
+      if params['context_path'] == '/'
+        ''
+      else
+        params['context_path']
+      end
+    end
+
+    def params
+      options
     end
   end
 end
