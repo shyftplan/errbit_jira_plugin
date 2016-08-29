@@ -88,7 +88,9 @@ module ErrbitJiraPlugin
 
     def errors
       errors = []
-      if self.class.fields.detect {|f| options[f[0]].blank? }
+      fields = self.class.fields
+      fields.delete(:context_path)
+      if fields.detect {|f| options[f[0]].blank? }
         errors << [:base, 'You must specify all non optional values!']
       end
       errors
